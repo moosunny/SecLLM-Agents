@@ -1,0 +1,14 @@
+# Whitelist mode: ignore everything, then re-include src/agents only
+/*
+!/.gitignore
+!/src/
+/src/*
+!/src/agents/
+
+# Never track these even inside src/agents
+.omc/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.env.*
