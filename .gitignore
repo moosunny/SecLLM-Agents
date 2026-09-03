@@ -10,6 +10,7 @@
 /src/*
 !/src/agents/
 !/src/astchunk/
+!/deepagents_pipeline/
 
 # Generated build artifacts (never track, anywhere)
 src/astchunk/build/
@@ -20,3 +21,5 @@ __pycache__/
 *.pyo
 .env
 .env.*
+.omo/
+artifacts/

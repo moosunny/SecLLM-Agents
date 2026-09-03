@@ -1,0 +1,45 @@
+[project]
+name = "deepagents-pipeline"
+version = "0.1.0"
+description = "langchain create_agent 기반 fix-suggestion 파이프라인 실험 하네스 (docs/deepagents_pipeline_design.md, 2026-08-19 deepagents에서 전환)"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=1.0",
+    "langchain-openai>=1.0",
+    "langfuse>=4.14.4",
+    "langgraph>=1.0",
+    "openai>=2.0",
+    # vendored astchunk (src/deepagents_pipeline/astchunk, 무수정 복사) 의존성.
+    # grammar는 astchunk_builder.py가 모듈 최상단에서 8개를 모두 import하므로
+    # java 전용 하네스에서도 전량이 필요하다. 핀은 메인 레포 pyproject와 동일.
+    "numpy>=2.4.2",
+    "pyrsistent>=0.20.0",
+    # grammar wheel의 ABI에 맞춰 메인 레포 uv.lock과 동일한 0.25.x로 고정한다.
+    # 0.26에서는 파싱 후 GC 중 SIGSEGV가 관측됐다.
+    "tree-sitter>=0.25.2,<0.26",
+    "tree-sitter-c>=0.24.1",
+    "tree-sitter-c-sharp>=0.23.1",
+    "tree-sitter-cpp>=0.23.4",
+    "tree-sitter-go>=0.23",
+    "tree-sitter-java>=0.23.5",
+    "tree-sitter-javascript>=0.25.0",
+    "tree-sitter-python>=0.25.0",
+    "tree-sitter-typescript>=0.23.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# astchunk은 메인 레포 src/astchunk/src/astchunk의 무수정 복사본이며, 벤더 파일이
+# `from astchunk...` 절대 import를 쓰므로 최상위 패키지로 유지한다.
+packages = ["src/deepagents_pipeline", "src/astchunk"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
