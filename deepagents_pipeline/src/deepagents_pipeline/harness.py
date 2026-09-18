@@ -32,7 +32,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from langchain.agents import create_agent
 from langchain.agents.middleware.types import AgentMiddleware, hook_config
@@ -45,7 +45,9 @@ from deepagents_pipeline.chunking import (
     CodeLanguageHint,
     SourceChunk,
     build_source_chunks,
+    UnsupportedLanguageError,
     find_chunk_for_line,
+    resolve_declared_language,
     resolve_language,
 )
 from deepagents_pipeline.contracts import (
@@ -97,6 +99,13 @@ NUDGE_MARKER = "harness_nudge"
 # 부풀림은 130줄로 줄어든다. 대신 5~30줄 간격 hunk가 분리 출고되므로 검증은
 # enforce_multi_site_policy=False 경로를 쓴다 (verifier.verify_candidate 참조).
 MERGE_GAP = 5
+
+# §6(c) 언어 범위 — TypeScript/C/C++에 이어 Python 평가 코퍼스 실행을 위해
+# 확장. 아래 언어는 모두 chunking 표·astchunk 그래머·
+# verify_fix._GRAMMAR_MODULES(V401)에 있다.
+SUPPORTED_LANGUAGES: Final = frozenset(
+    {"java", "javascript", "typescript", "go", "c", "cpp", "python"}
+)
 
 _HANGUL = re.compile(r"[가-힣]")
 # 식별자·구두점 런 — 한국어 desc 판정 전에 제거한다 (Java 식별자는 desc에 불가피)
@@ -895,8 +904,12 @@ def build_target_chunks(ur: AgentUserRequest) -> list[SourceChunk]:
     return selected
 
 
-def render_target_chunks(chunks: list[SourceChunk]) -> str:
-    """read_code와 동일한 거터로 청크를 렌더링한다 (모델이 두 출처를 같게 취급하도록)."""
+def render_target_chunks(chunks: list[SourceChunk], language: str = "java") -> str:
+    """read_code와 동일한 거터로 청크를 렌더링한다 (모델이 두 출처를 같게 취급하도록).
+
+    `language`는 chunking.resolve_language의 정규화 이름으로 코드펜스 태그에 쓴다
+    (예제 섹션의 InitialTask.language와 같은 값).
+    """
     blocks: list[str] = []
     for chunk in chunks:
         ancestry = " > ".join(chunk.ancestors)
@@ -904,7 +917,7 @@ def render_target_chunks(chunks: list[SourceChunk]) -> str:
         if ancestry:
             label += f" — {ancestry}"
         body = _numbered(chunk.content.split("\n"), chunk.start_line)
-        blocks.append(f"{label}\n```java\n{body}\n```")
+        blocks.append(f"{label}\n```{language}\n{body}\n```")
     return "\n\n".join(blocks)
 
 
@@ -997,17 +1010,22 @@ def run_fix_with_trace(
     started = time.monotonic()
     ur = request.user_request
 
-    # §6(c): java 전용 — 다른 언어 레코드가 잘못 라우팅되면 조용히 처리하지 않는다.
-    declared_language = (ur.programming_language or "").strip().lower()
-    declared_extension = (ur.file_extension or "").strip().lower()
-    if declared_language != "java" or declared_extension not in {"", ".java"}:
+    # §6(c): SUPPORTED_LANGUAGES 게이트 — 잘못 라우팅된 레코드(미지원 언어, 모르는
+    # 확장자, 이름·확장자 불일치)는 모델 호출 없이 E103으로 반려한다.
+    hint = CodeLanguageHint(ur.programming_language, ur.file_extension)
+    try:
+        language = resolve_declared_language(hint)
+        if language not in SUPPORTED_LANGUAGES:
+            raise UnsupportedLanguageError(
+                f"language {language!r} is not enabled in this experimental harness"
+            )
+    except UnsupportedLanguageError as exc:
         return FixOutcome(
             response=build_error_response(
                 request,
                 error=ERROR_UNSUPPORTED_INPUT,
                 message=(
-                    "only declared Java with an empty or .java fileExtension is supported "
-                    "by this experimental harness; "
+                    f"{exc} Supported: {', '.join(sorted(SUPPORTED_LANGUAGES))}; "
                     f"got programmingLanguage={ur.programming_language!r}, "
                     f"fileExtension={ur.file_extension!r}."
                 ),
@@ -1028,9 +1046,6 @@ def run_fix_with_trace(
     code_lines = ur.entire_code.split("\n")
 
     holder = SubmissionHolder()
-    language = resolve_language(
-        CodeLanguageHint(ur.programming_language, ur.file_extension)
-    )
     read_code, edit_code, submit_fix = make_fix_tools(
         code_lines,
         holder,
@@ -1055,7 +1070,7 @@ def run_fix_with_trace(
                 ensure_ascii=False,
                 indent=2,
             ),
-            target_chunks=render_target_chunks(build_target_chunks(ur)),
+            target_chunks=render_target_chunks(build_target_chunks(ur), language),
             checker_description=english_first(
                 ur.issue_description_en, ur.issue_description_ko
             ),

@@ -114,6 +114,32 @@ def resolve_language(hint: CodeLanguageHint) -> str:
     )
 
 
+def resolve_declared_language(hint: CodeLanguageHint) -> str:
+    """하네스 입구용 엄격판 — 두 힌트가 모두 알려진 값이고 서로 일치해야 한다.
+
+    `resolve_language`는 프로덕션 규칙대로 확장자가 이름을 조용히 덮어쓰지만, 입구
+    게이트(harness.run_fix_with_trace)는 잘못 라우팅된 레코드를 조용히 처리하면 안
+    되므로 ① 비어 있지 않은 확장자가 표에 없거나 ② 이름과 확장자가 다른 언어를
+    가리키면 UnsupportedLanguageError를 던진다 (2026-09-08, java 전용 게이트를
+    언어 집합 게이트로 바꾸면서 기존 반려 규칙을 보존).
+    """
+    extension = (hint.file_extension or "").lower().strip()
+    name = (hint.programming_language or "").lower().strip()
+    by_extension = _EXTENSION_TO_LANGUAGE.get(extension) if extension else None
+    by_name = _NAME_TO_LANGUAGE.get(name) if name else None
+    if extension and by_extension is None:
+        raise UnsupportedLanguageError(
+            f"Unknown fileExtension {hint.file_extension!r} "
+            f"(programmingLanguage={hint.programming_language!r})."
+        )
+    if by_extension and by_name and by_extension != by_name:
+        raise UnsupportedLanguageError(
+            f"fileExtension {hint.file_extension!r} ({by_extension}) conflicts with "
+            f"programmingLanguage {hint.programming_language!r} ({by_name})."
+        )
+    return resolve_language(hint)
+
+
 def build_source_chunks(
     code: str,
     hint: CodeLanguageHint,
