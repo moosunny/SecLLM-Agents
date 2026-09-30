@@ -7,6 +7,7 @@ from deepagents_pipeline.chunking import (
     build_source_chunks,
     fallback_line_chunks,
     find_chunk_for_line,
+    resolve_declared_language,
     resolve_language,
 )
 
@@ -47,6 +48,50 @@ def test_chunk_content_is_header_free_and_line_aligned():
 def test_file_extension_wins_over_programming_language():
     assert resolve_language(CodeLanguageHint("java", ".py")) == "python"
     assert resolve_language(CodeLanguageHint("Java", None)) == "java"
+
+
+@pytest.mark.parametrize("name,extension,expected", [
+    ("Java", None, "java"),
+    ("js", ".jsx", "javascript"),
+    ("ts", ".tsx", "typescript"),
+    ("golang", "", "go"),
+    (" C ", " .H ", "c"),
+    ("cpp", ".h", "cpp"),
+    ("C++", ".hpp", "cpp"),
+    ("cpp", ".hh", "cpp"),
+    ("cpp", ".hxx", "cpp"),
+])
+def test_declared_language_normalizes_valid_metadata(
+    name: str, extension: str | None, expected: str,
+) -> None:
+    # Given valid declared language metadata, including aliases and headers.
+    hint = CodeLanguageHint(name, extension)
+    # When admission resolves the declared language.
+    language = resolve_declared_language(hint)
+    # Then the normalized language preserves the declaration.
+    assert language == expected
+
+
+@pytest.mark.parametrize("name,extension", [
+    ("unknown", ".js"),
+    ("ruby", ".py"),
+    ("", ".js"),
+    (" ", ".java"),
+    ("java", ".py"),
+    ("java", ".unknown"),
+    ("c", ".cpp"),
+    ("c", ".hpp"),
+    ("python", ".h"),
+    ("typescript", ".js"),
+])
+def test_declared_language_rejects_invalid_metadata(name: str, extension: str) -> None:
+    # Given an unknown declaration or incompatible extension.
+    hint = CodeLanguageHint(name, extension)
+    # When admission resolves the declared language.
+    with pytest.raises(UnsupportedLanguageError) as excinfo:
+        resolve_declared_language(hint)
+    # Then the input error contract is preserved.
+    assert excinfo.value.error == ("E103", "input")
 
 
 def test_unsupported_language_carries_e103():

@@ -904,7 +904,7 @@ def build_target_chunks(ur: AgentUserRequest) -> list[SourceChunk]:
     return selected
 
 
-def render_target_chunks(chunks: list[SourceChunk], language: str = "java") -> str:
+def render_target_chunks(chunks: list[SourceChunk], *, language: str = "java") -> str:
     """read_code와 동일한 거터로 청크를 렌더링한다 (모델이 두 출처를 같게 취급하도록).
 
     `language`는 chunking.resolve_language의 정규화 이름으로 코드펜스 태그에 쓴다
@@ -1070,7 +1070,7 @@ def run_fix_with_trace(
                 ensure_ascii=False,
                 indent=2,
             ),
-            target_chunks=render_target_chunks(build_target_chunks(ur), language),
+            target_chunks=render_target_chunks(build_target_chunks(ur), language=language),
             checker_description=english_first(
                 ur.issue_description_en, ur.issue_description_ko
             ),

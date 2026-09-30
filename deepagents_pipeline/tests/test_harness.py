@@ -382,9 +382,9 @@ def test_usage_preserved_when_model_raises_midrun():
     assert outcome.trace_dict()["model_turns"] == 2
 
 
-def test_non_java_language_rejected_e103():
+def test_unsupported_language_rejected_e103():
     req_data = _request().model_dump(by_alias=True)
-    req_data["userRequest"]["programmingLanguage"] = "python"
+    req_data["userRequest"]["programmingLanguage"] = "ruby"
     req = AgentModuleRequest.model_validate(req_data)
     outcome = run_fix_with_trace(req, _fake([AIMessage("호출되면 안 됨")]))
     dumped = outcome.response.model_dump(by_alias=True)
