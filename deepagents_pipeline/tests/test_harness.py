@@ -14,6 +14,7 @@ from deepagents_pipeline.harness import (
     MAX_FIX_ATTEMPTS,
     MAX_MODEL_TURNS,
     MAX_NO_TOOL_NUDGES,
+    SUPPORTED_LANGUAGES,
     HarnessControlMiddleware,
     SubmissionHolder,
     build_agent,
@@ -202,6 +203,16 @@ def test_rendered_chunks_use_the_read_code_gutter():
     assert first_body_line.strip().startswith(str(pack[0].start_line))
 
 
+def test_rendered_chunks_tag_the_fence_with_the_resolved_language():
+    request = _wide_request(sink_line=3, event_lines=[395])
+    pack = build_target_chunks(request.user_request)
+
+    rendered = render_target_chunks(pack, language="javascript")
+
+    assert rendered.count("```javascript") == len(pack)
+    assert "```java\n" not in rendered
+
+
 def test_pass_first_try_success_envelope():
     msgs = [_edit_msg(1), _submit_msg(1)]
     resp = run_fix(_request(), _fake(msgs))
@@ -382,7 +393,8 @@ def test_usage_preserved_when_model_raises_midrun():
     assert outcome.trace_dict()["model_turns"] == 2
 
 
-def test_unsupported_language_rejected_e103():
+def test_unknown_language_rejected_e103():
+    assert "ruby" not in SUPPORTED_LANGUAGES
     req_data = _request().model_dump(by_alias=True)
     req_data["userRequest"]["programmingLanguage"] = "ruby"
     req = AgentModuleRequest.model_validate(req_data)
@@ -404,8 +416,99 @@ def test_java_boundary_accepts_java_with_empty_or_java_extension():
         assert model.calls == 2
 
 
+JS_LINES = ["const db = require('./db')", "", "function load(id) {"] + [
+    f"  const q{i} = {i}" for i in range(1, 40)
+] + ["  return db.query(`SELECT * FROM t WHERE id='${id}'`)", "}", "module.exports = { load }"]
+JS_OLD = "  return db.query(`SELECT * FROM t WHERE id='${id}'`)"
+JS_NEW = "  return db.query('SELECT * FROM t WHERE id = ?', [id])"
+TS_LINES = ["interface User { id: string }", "", "function load(id: string): User {"] + [
+    f"  const q{i}: number = {i}" for i in range(1, 40)
+] + ["  return db.query(`SELECT * FROM t WHERE id='${id}'`)", "}"]
+TS_OLD = "  return db.query(`SELECT * FROM t WHERE id='${id}'`)"
+TS_NEW = "  return db.query('SELECT * FROM t WHERE id = ?', [id])"
+C_LINES = ["#include <stdio.h>", "", "int clamp(int x) {"] + [
+    f"  int v{i} = {i};" for i in range(1, 40)
+] + ["  return x;", "}"]
+C_OLD = "  return x;"
+C_NEW = "  return x < 0 ? 0 : x;"
+CPP_LINES = ["#include <iostream>", "", "int clamp(int x) {"] + [
+    f"  int v{i} = {i};" for i in range(1, 40)
+] + ["  return x;", "}"]
+CPP_OLD = "  return x;"
+CPP_NEW = "  return x < 0 ? 0 : x;"
+GO_LINES = ["package main", "", "import \"crypto/md5\"", "", "func hash(b []byte) [16]byte {"] + [
+    f"\tvar v{i} = {i}" for i in range(1, 40)
+] + ["\treturn md5.Sum(b)", "}"]
+GO_OLD = "\treturn md5.Sum(b)"
+GO_NEW = "\treturn sha256.Sum256(b)"
+PYTHON_LINES = ["def clamp(x):"] + [
+    f"    v{i} = {i}" for i in range(1, 40)
+] + ["    return x"]
+PYTHON_OLD = "    return x"
+PYTHON_NEW = "    return max(x, 0)"
+
+
+def test_supported_languages_accepted_and_verified_with_their_own_grammar():
+    cases = (
+        ("JavaScript", ".js", JS_LINES, JS_OLD, JS_NEW),
+        ("TypeScript", ".ts", TS_LINES, TS_OLD, TS_NEW),
+        ("C", ".c", C_LINES, C_OLD, C_NEW),
+        ("C++", ".cpp", CPP_LINES, CPP_OLD, CPP_NEW),
+        ("Go", ".go", GO_LINES, GO_OLD, GO_NEW),
+        ("Python", ".py", PYTHON_LINES, PYTHON_OLD, PYTHON_NEW),
+    )
+    for language, extension, lines, old, new in cases:
+        code = "\n".join(lines)
+        sink = lines.index(old) + 1
+        model = _CountingFakeModel(messages=iter([_edit_msg(1, old, new), _submit_msg(1)]))
+        outcome = run_fix_with_trace(
+            _request(
+                programmingLanguage=language,
+                fileExtension=extension,
+                entireCode=code,
+                issueLineNumber=sink,
+                contexts=[{"lineNo": sink, "eventType": "sink", "messageKey": "k", "message": "m"}],
+            ),
+            model,
+        )
+
+        assert outcome.response.is_success is True, (language, outcome.response)
+        assert outcome.terminal_cause == "pass"
+        assert model.calls == 2
+        mods = outcome.response.model_dump(by_alias=True)["codeModifications"]
+        assert _apply_wire_operations(lines, mods) == [new if l == old else l for l in lines]
+
+
+def test_supported_language_edit_that_breaks_syntax_fails_v401_under_that_grammar():
+    # 자바 파서였다면 JS 원본 자체가 에러투성이라 차등 검사가 무의미해진다 — JS 문법으로
+    # 판정돼야 괄호 하나 빠진 편집이 V401로 잡힌다.
+    code = "\n".join(JS_LINES)
+    sink = JS_LINES.index(JS_OLD) + 1
+    broken = "  return db.query('SELECT * FROM t WHERE id = ?', [id]"
+    model = _fake([_edit_msg(1, JS_OLD, broken), _submit_msg(1)])
+    outcome = run_fix_with_trace(
+        _request(
+            programmingLanguage="JavaScript",
+            fileExtension=".js",
+            entireCode=code,
+            issueLineNumber=sink,
+            contexts=[{"lineNo": sink, "eventType": "sink", "messageKey": "k", "message": "m"}],
+        ),
+        model,
+    )
+
+    assert outcome.attempts and outcome.attempts[0]["passed"] is False
+    assert {e["code"] for e in outcome.attempts[0]["errors"]} == {"V401"}
+
+
 def test_java_boundary_rejects_conflicting_or_unknown_extension_before_model_call():
-    for language, extension in (("java", ".py"), ("python", ".java"), ("java", ".unknown")):
+    for language, extension in (
+        ("java", ".py"),
+        ("python", ".java"),
+        ("java", ".unknown"),
+        ("javascript", ".go"),
+        ("go", ".js"),
+    ):
         model = _CountingFakeModel(messages=iter([AIMessage("must not run")]))
         outcome = run_fix_with_trace(
             _request(programmingLanguage=language, fileExtension=extension), model
