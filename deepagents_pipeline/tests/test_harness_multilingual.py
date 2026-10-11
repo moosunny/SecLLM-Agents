@@ -44,6 +44,7 @@ def test_language_edit_passes_real_verifier(language: str, extension: str, sourc
     ("cpp", ".hpp", "int value = 1;", "int value = ;"),
     ("go", ".go", "package demo\nvar value = 1", "package demo\nvar value ="),
     ("python", ".py", "value = 1", "value ="),
+    ("python", ".py", "value = 1", "    value = 1"),
     ("typescript", ".ts", "const value: number = 1;", "const value: number = ;"),
     ("typescript", ".tsx", "const view = <div>{1}</div>;", "const view = <div>{1 + }</div>;"),
 ])

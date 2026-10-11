@@ -1,6 +1,10 @@
 """G002 VerifierTool 단위 테스트 (LLM-free) — 설계 §6 출력 계약."""
 
+import ast
 import re
+import warnings
+
+import pytest
 
 from deepagents_pipeline.verifier import (
     _MAX_CONTEXT_LINES,
@@ -66,6 +70,76 @@ def test_valid_python_edit_passes():
     }
     result = verify_candidate(
         PYTHON_LINES, candidate, attempt=1, language="python", file_extension=".py"
+    )
+    assert result["passed"] is True, result["errors"]
+
+
+@pytest.mark.parametrize("original,modified", [
+    ("x = 1\ny = 2", "x = 1\n    y = 2"),
+    ("if True:\n    x = 1\ny = 2", "if True:\nx = 1\ny = 2"),
+    ("if True:\n    x = 1\n    y = 2", "if True:\n    x = 1\n  y = 2"),
+])
+def test_python_ast_rejects_indentation_regression(original, modified):
+    # These regressions have no tree-sitter ERROR or missing nodes.
+    vf = _verify_fix_module()
+    assert vf._syntax_issues(modified, "python", ".py") == []
+    with pytest.raises(SyntaxError) as failure:
+        ast.parse(modified)
+    candidate = {
+        "desc": DESC,
+        "codeModifications": [
+            {"type": "delete", "startLine": 1, "endLine": len(original.split("\n"))},
+            {"type": "add", "startLine": 1, "content": modified},
+        ],
+    }
+    result = verify_candidate(
+        original.split("\n"), candidate, attempt=2, language="python", file_extension=".py"
+    )
+    assert result["passed"] is False
+    assert result["attempt"] == 2
+    assert result["regions"]
+    error, = result["errors"]
+    assert (error["code"], error["stage"]) == ("V401", "syntax")
+    assert f"L{failure.value.lineno}: {failure.value.msg}" in error["message"]
+    assert "new coordinates" in error["message"]
+
+
+@pytest.mark.parametrize("original", [
+    'print "hello"\nx = 1',  # Python 2
+    "    x = 0\nx = 1",  # Already-invalid Python 3
+])
+@pytest.mark.parametrize("replacement,passed", [("x = 2", True), ("x =", False)])
+def test_unparseable_python_original_preserves_existing_verdict(original, replacement, passed):
+    candidate = {"desc": DESC, "codeModifications": _replace(2, replacement)}
+    result = verify_candidate(
+        original.split("\n"), candidate, attempt=1, language="python", file_extension=".py"
+    )
+    assert result["passed"] is passed
+    assert not any("Python AST" in e["message"] for e in result["errors"])
+    if not passed:
+        assert any(e["code"] == "V401" for e in result["errors"])
+
+
+def test_python_ast_suppresses_syntax_warnings():
+    original = ['value = "\\q"', 'other = "\\z"']
+    candidate = {"desc": DESC, "codeModifications": _replace(2, 'other = "\\y"')}
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", SyntaxWarning)
+        result = verify_candidate(
+            original, candidate, attempt=1, language="python", file_extension=".py"
+        )
+    assert result["passed"] is True, result["errors"]
+    assert not [w for w in caught if issubclass(w.category, SyntaxWarning)]
+
+
+def test_non_python_does_not_run_ast_parse(monkeypatch):
+    def unexpected_parse(*args, **kwargs):
+        raise AssertionError("Python AST parsing must only run for Python")
+
+    monkeypatch.setattr("deepagents_pipeline.verifier.ast.parse", unexpected_parse)
+    result = verify_candidate(
+        JAVA_LINES, {"desc": DESC, "codeModifications": _replace(5, "    int f4() { return 400; }")},
+        attempt=1, language="java", file_extension=".java",
     )
     assert result["passed"] is True, result["errors"]
 

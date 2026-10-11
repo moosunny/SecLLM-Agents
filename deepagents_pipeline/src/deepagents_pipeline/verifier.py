@@ -20,6 +20,8 @@ ERROR 첫 토큰, 해당 줄 에코)과 지점 주변 ±3줄 문맥을 덧붙인
 
 from __future__ import annotations
 
+import ast
+import warnings
 from collections import Counter
 from dataclasses import dataclass
 from functools import cache
@@ -395,6 +397,27 @@ def verify_candidate(
 
     errors = [classify_error(msg) for msg in result["errors"]]
     _attach_syntax_locations(vf, errors, result, code_lines, file_extension)
+    if language == "python" and result["new_lines"] is not None:
+        # tree-sitter가 놓치는 들여쓰기 오류를 보완한다. 원본부터 Python 3
+        # AST로 읽을 수 없으면(Python 2 등) 기존 차등 검증 결과를 유지한다.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            try:
+                ast.parse("\n".join(code_lines))
+            except SyntaxError:
+                pass
+            else:
+                try:
+                    ast.parse("\n".join(result["new_lines"]))
+                except SyntaxError as e:
+                    errors.append(VerifierError(
+                        code="V401",
+                        stage="syntax",
+                        message=(
+                            "the edit introduces syntax errors (Python AST). "
+                            f"{_LOCATION_HEADER}L{e.lineno}: {e.msg}"
+                        ),
+                    ))
     return VerifierResult(
         passed=not errors,
         errors=errors,
