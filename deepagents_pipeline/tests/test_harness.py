@@ -652,9 +652,9 @@ def test_edit_fuzzy_multiline_block_with_wrong_indent():
     assert holder.fuzzy_matches == 1  # 두 번째는 exact 매칭
 
 
-def test_fuzzy_edit_reindents_new_string_to_the_file():
-    # rerun2 잔여 실패 5/6: 모델이 old/new 모두 같은 오기 들여쓰기로 쓰면 오염된
-    # 블록이 삽입돼 복구 나선에 빠졌다 — 파일 실재 들여쓰기(span)로 보정돼야 한다.
+def test_fuzzy_edit_inserts_new_string_verbatim():
+    # 2026-10-14: new_string 들여쓰기 보정을 껐다. fuzzy 매칭이어도 new_string은 모델이
+    # 쓴 그대로 삽입된다 (이전에는 파일 실재 들여쓰기 4칸으로 보정됐다).
     holder = SubmissionHolder()
     edit, _ = _tools(holder)
     wrong_old = "        " + GOOD_OLD.lstrip()  # 실제 4칸 → 8칸 오기
@@ -663,14 +663,16 @@ def test_fuzzy_edit_reindents_new_string_to_the_file():
     out = edit.invoke({"old_string": wrong_old, "new_string": wrong_new})
 
     assert out.startswith("OK.")
-    assert holder.reindented_edits == 1
-    assert "re-indented" in out
-    # 4칸으로 보정 삽입됐음을 exact 재매칭으로 증명
-    out2 = edit.invoke({"old_string": GOOD_NEW, "new_string": GOOD_OLD})
+    assert holder.fuzzy_matches == 1
+    assert holder.reindented_edits == 0
+    assert "re-indented" not in out
+    # 8칸 그대로 삽입됐음을 exact 재매칭으로 증명
+    out2 = edit.invoke({"old_string": wrong_new, "new_string": GOOD_OLD})
     assert out2.startswith("OK.")
+    assert holder.fuzzy_matches == 1  # 두 번째는 exact 매칭
 
 
-def test_fuzzy_reindent_preserves_relative_structure():
+def test_fuzzy_edit_keeps_new_string_relative_structure_verbatim():
     holder = SubmissionHolder()
     edit, _ = _tools(holder)
     wrong_old = "        " + GOOD_OLD.lstrip()
@@ -679,10 +681,10 @@ def test_fuzzy_reindent_preserves_relative_structure():
     out = edit.invoke({"old_string": wrong_old, "new_string": wrong_new})
 
     assert out.startswith("OK.")
-    assert holder.reindented_edits == 1
-    expected = "    if (true) {\n        return 400;\n    }"
-    out2 = edit.invoke({"old_string": expected, "new_string": GOOD_OLD})
+    assert holder.reindented_edits == 0
+    out2 = edit.invoke({"old_string": wrong_new, "new_string": GOOD_OLD})
     assert out2.startswith("OK.")
+    assert holder.fuzzy_matches == 1
 
 
 def test_exact_match_never_reindents_new_string():

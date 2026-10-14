@@ -725,8 +725,13 @@ def make_fix_tools(
                 "No verification attempt was consumed.",
             )
         new_text = new_string
-        if match.replacer != "simple":
-            new_text = _reindent_new_string(match.span, old_string, new_string)
+        # 2026-10-14 사용자 결정: new_string 들여쓰기 보정을 끈다 (OpenCode edit과 같이
+        # new_string은 모델이 쓴 그대로 삽입). 첫 줄 기준 보정이 qwen3.8-27b의 "첫 줄만
+        # 들여쓰기 없는" 편집을 틀어지게 해 test_v2 실패 36건 중 33건을 만들었고,
+        # 줄번호 접두어를 `<line>: <content>`로 바꾼 뒤로는 보정이 거의 발동하지 않는다.
+        # _reindent_new_string 정의는 되살릴 때를 위해 남겨 둔다.
+        # if match.replacer != "simple":
+        #     new_text = _reindent_new_string(match.span, old_string, new_string)
         if match.span == new_text:
             # fuzzy 매칭이 잡은 실제 원문이 new_string과 동일 — 파일은 이미 원하는
             # 상태다. OK로 통과시키면 어떤 카운터에도 안 잡히는 no-op 나선이 된다.
