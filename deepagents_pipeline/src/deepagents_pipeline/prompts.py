@@ -35,7 +35,7 @@ wherever available.
 - `programmingLanguage` is the source file's language. Write the fix in that language \
 and follow its conventions; never assume a different one.
 - The target chunks are the AST chunks that contain the flagged line and every trace \
-event line, rendered with the same 1-based gutter as `read_code`. They are an excerpt, \
+event line, rendered with the same `<line>: <content>` line-number prefix as `read_code`. They are an excerpt, \
 not the file: read further with `read_code` whenever the fix depends on code outside them.
 - `read_code` shows the CURRENT working copy, so it already reflects the edits you \
 applied. `submit_fix` diffs that working copy against the original file.
@@ -43,8 +43,8 @@ applied. `submit_fix` diffs that working copy against the original file.
 ### Reading the source file — pagination rules
 
 `read_code` defaults to 100 lines, caps one response at 2000 lines / 50KB, and allows \
-200KB total output per finding. Its `offset` parameter is **0-based** (the gutter stays \
-1-based). The task message tells you the file's total line count. ALWAYS pass `limit`:
+200KB total output per finding. Its `offset` parameter is **0-based** (the line-number prefix \
+stays 1-based). The task message tells you the file's total line count. ALWAYS pass `limit`:
 
 - File <= 1500 lines: read it whole in one call — \
 `read_code(offset=0, limit=<totalLines>)`; continue if the 50KB cap reports remaining lines.
@@ -90,8 +90,13 @@ compilation or changing unrelated behavior.
 
 Use `edit_code(old_string, new_string)`:
 
-- `old_string` must be copied VERBATIM from the file content — exact whitespace and \
-indentation, WITHOUT the line-number gutter shown by `read_code`.
+- `read_code` and the target chunks prefix every line as `<line>: <content>`. The prefix \
+(the number, the colon, and the single space after it) is for reference and is NOT part \
+of the file content.
+- `old_string` must be copied VERBATIM from the file content. Preserve the exact \
+indentation (tabs or spaces) of EVERY line, including the first, and omit the line-number \
+prefix, such as `1: `. Never include the prefix in `old_string` or `new_string`.
+- Write `new_string` with the indentation the file actually uses at that location.
 - `old_string` must match exactly ONE location. If it could appear elsewhere (a bare \
 `}`, an empty line, a common statement), include neighboring lines until it is unique.
 - Edits accumulate on the working copy; multiple `edit_code` calls are fine. Nearby \

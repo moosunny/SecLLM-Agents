@@ -35,10 +35,13 @@ def test_example_fence_is_untagged_without_language():
 
 def test_edit_tool_rules_are_explicit():
     # 2026-08-10 A/B: qwen3.5-9b의 주 실패는 old_string 정확 재현 실패(연속 8~9회).
-    # verbatim 복사·거터 제거·유일 매칭 규칙이 프롬프트에 명시돼야 한다.
+    # verbatim 복사·줄번호 접두어 제거·유일 매칭 규칙이 프롬프트에 명시돼야 한다.
+    # 2026-10-14: 접두어 형식(`<line>: <content>`)과 들여쓰기 보존을 예시와 함께 명시.
     assert "edit_code" in SYSTEM_PROMPT
     assert "VERBATIM" in SYSTEM_PROMPT
-    assert "WITHOUT the line-number gutter" in SYSTEM_PROMPT
+    assert "`<line>: <content>`" in SYSTEM_PROMPT
+    assert "such as `1: `" in SYSTEM_PROMPT
+    assert "Never include the prefix in `old_string` or `new_string`" in SYSTEM_PROMPT
     assert "exactly ONE location" in SYSTEM_PROMPT
 
 

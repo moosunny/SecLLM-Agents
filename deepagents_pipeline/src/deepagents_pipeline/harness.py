@@ -3,8 +3,9 @@
 2026-08-19: deepagents(create_deep_agent) → langchain.agents.create_agent 전환.
 같은 날 Option A 개정(사용자 결정): 경로 기반 read_file(/input/*)을
 `read_code(offset, limit)`로 교체하고 meta는 초기 태스크 메시지에 JSON 인라인.
-출력 형식(0-based offset, 기본 limit 100, 우측정렬 거터+2칸 구분, 남은 줄
-안내)은 deepagents 0.7.4 read_file 시맨틱을 그대로 잇는다. 경로 인자·not-found
+출력 형식(0-based offset, 기본 limit 100, 남은 줄 안내)은 deepagents 0.7.4 read_file
+시맨틱을 그대로 잇는다. 줄번호 접두어만 2026-10-14에 `<line>: <content>`로 바꿨다
+(_numbered 참조). 경로 인자·not-found
 실패 표면은 소멸. 이 개정 이전의 경로 기반 계측과는 궤적 비교 불가 (새 arm).
 
 - `read_code`가 요청 스키마의 entireCode 문자열을 페이징 노출 (읽기 전용)
@@ -333,20 +334,23 @@ class HarnessControlMiddleware(AgentMiddleware):
 
 
 def _numbered(lines: list[str], start_line: int) -> str:
-    """deepagents format_content_with_line_numbers 재현 — 우측정렬 거터 + 2칸 구분.
+    """줄마다 `<line>: <content>` 접두어를 붙인다 (OpenCode read 도구와 같은 형식).
+
+    2026-10-14 이전에는 deepagents format_content_with_line_numbers의 우측정렬 거터 +
+    2칸 구분(`11  code`)을 썼다. 구분자가 공백뿐이라 들여쓰기와 경계가 보이지 않았고,
+    test_v2 전수 실행에서 qwen3.5-9b·qwen3.8-27b 모두 old_string 들여쓰기를 +2칸으로
+    보내는 것이 지배적 오차였다. 콜론으로 접두어와 파일 내용의 경계를 드러낸다.
 
     5000자 초과 줄은 `N.1`, `N.2` 연속 마커로 분할된다 (Java 소스에선 사실상
     미발생이지만 형식 계약을 그대로 유지한다).
     """
     rows: list[tuple[str, str]] = []
-    width = 0
     for i, line in enumerate(lines):
         chunks = [line[s : s + MAX_LINE_LENGTH] for s in range(0, len(line), MAX_LINE_LENGTH)] or [line]
         for ci, chunk in enumerate(chunks):
             marker = str(start_line + i) if ci == 0 else f"{start_line + i}.{ci}"
             rows.append((marker, chunk))
-            width = max(width, len(marker))
-    return "\n".join(f"{marker:>{width}}  {chunk}" for marker, chunk in rows)
+    return "\n".join(f"{marker}: {chunk}" for marker, chunk in rows)
 
 
 def _make_read_code_tool(lines_provider: Callable[[], list[str]]):
@@ -355,8 +359,9 @@ def _make_read_code_tool(lines_provider: Callable[[], list[str]]):
 
     @tool("read_code")
     def read_code(offset: int = 0, limit: int = DEFAULT_READ_LIMIT) -> str:
-        """Read the current working copy. Returns content with 1-based line
-        numbers in the gutter. `offset` is the 0-based line to start from;
+        """Read the current working copy. Each line is prefixed by its 1-based
+        line number as `<line>: <content>`. The prefix is for reference and is not
+        part of the file content. `offset` is the 0-based line to start from;
         `limit` is capped at 2000 lines (default 100). Each response is capped
         at 50KB and this tool instance has a cumulative 200KB output budget.
         If the output says lines remain, continue from the reported offset."""
@@ -675,9 +680,11 @@ def make_fix_tools(
     @tool("edit_code")
     def edit_code(old_string: str, new_string: str) -> str:
         """Replace old_string with new_string in the working copy of the source file.
-        old_string must match EXACTLY ONE location: copy it verbatim from read_code
-        output WITHOUT the line-number gutter, and include neighboring lines to make
-        it unique. Edits accumulate on the working copy; submit_fix diffs it against
+        When editing text from read_code output, preserve the exact indentation
+        (tabs or spaces) and omit the line-number prefix, such as `1: `. Never
+        include the prefix in old_string or new_string. old_string must match
+        EXACTLY ONE location: include neighboring lines to make it unique. Edits
+        accumulate on the working copy; submit_fix diffs it against
         the original. Failed matches do not consume verification attempts."""
         holder.edit_calls += 1
         if holder.passed:
@@ -913,7 +920,7 @@ def build_target_chunks(ur: AgentUserRequest) -> list[SourceChunk]:
 
 
 def render_target_chunks(chunks: list[SourceChunk], *, language: str = "java") -> str:
-    """read_code와 동일한 거터로 청크를 렌더링한다 (모델이 두 출처를 같게 취급하도록).
+    """read_code와 동일한 줄번호 접두어로 청크를 렌더링한다 (모델이 두 출처를 같게 취급하도록).
 
     `language`는 chunking.resolve_language의 정규화 이름으로 코드펜스 태그에 쓴다
     (예제 섹션의 InitialTask.language와 같은 값).

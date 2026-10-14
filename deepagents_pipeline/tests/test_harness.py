@@ -561,7 +561,7 @@ def test_read_code_reflects_working_copy_after_edit():
     edit_code.invoke({"old_string": GOOD_OLD, "new_string": GOOD_NEW})
     out = read_code.invoke({"offset": 4, "limit": 1})
 
-    assert out.startswith(f"5  {GOOD_NEW}\n")
+    assert out.startswith(f"5: {GOOD_NEW}\n")
     assert GOOD_OLD not in out
 
 
@@ -1005,9 +1005,10 @@ def test_read_code_whole_with_explicit_limit():
     out = _read_tool().invoke({"offset": 0, "limit": 80})
     lines = out.split("\n")
     assert len(lines) == 80
-    # 우측정렬 거터 + 2칸 구분 (deepagents format_content_with_line_numbers 계약 승계)
-    assert lines[0] == " 1  public class Demo {"
-    assert lines[79] == "80  }"
+    # `<line>: <content>` 접두어 — 정렬 패딩 없음, 콜론+공백 1칸 뒤가 파일 내용 그대로
+    assert lines[0] == "1: public class Demo {"
+    assert lines[4] == "5:     int f4() { return 4; }"  # 들여쓰기 4칸이 그대로 보인다
+    assert lines[79] == "80: }"
     assert "remaining" not in out
 
 
@@ -1019,7 +1020,7 @@ def test_read_code_default_limit_and_pagination_notice():
     assert "[Read 100 lines (lines 1-100 of 250 total). 150 lines remaining from offset 100.]" in out
     # 안내된 offset에서 재개하면 정확히 다음 줄부터 읽힌다
     out2 = tool.invoke({"offset": 100, "limit": 200})
-    assert out2.startswith("101  line 101")
+    assert out2.startswith("101: line 101")
     assert "remaining" not in out2
 
 
@@ -1036,7 +1037,7 @@ def test_read_code_offset_past_eof_errors():
 
 def test_read_code_trailing_newline_not_counted():
     out = _read_tool("a\nb\n").invoke({})
-    assert out == "1  a\n2  b"
+    assert out == "1: a\n2: b"
 
 
 def test_read_code_caps_each_call_at_two_thousand_lines():
@@ -1044,8 +1045,8 @@ def test_read_code_caps_each_call_at_two_thousand_lines():
 
     out = _read_tool(code).invoke({"offset": 0, "limit": 2501})
 
-    assert "2000  line 2000" in out
-    assert "2001  line 2001" not in out
+    assert "2000: line 2000" in out
+    assert "2001: line 2001" not in out
     assert "remaining from offset 2000" in out
 
 
