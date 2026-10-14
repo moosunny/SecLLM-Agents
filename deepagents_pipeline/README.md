@@ -68,6 +68,15 @@ API key는 요청 `APIKEY` > `LITELLM_MASTER_KEY` 환경변수 > `"EMPTY"` 순.
   `MAX_AGENT_STEPS`를 50 고정으로 두면 recursion_limit이 17턴에서 걸린다(08-27 전수 실행에서
   발견, 두 모델 모두 recursion_limit 전부 17턴). 지금은 `MAX_MODEL_TURNS(25) ×
   GRAPH_STEPS_PER_TURN(3)`으로 계산하며 회귀 테스트가 25턴을 고정한다.
+- **언어 범위가 java 전용에서 `SUPPORTED_LANGUAGES={java, javascript, typescript, go, c, cpp, python}`로 확장 (2026-09-16,
+  설계 §6(c)와 다름)**: `harness.run_fix_with_trace` 입구 게이트가 `chunking.resolve_declared_language`
+  (모르는 확장자·이름/확장자 불일치는 E103)와 위 집합으로 판정한다. 루프·도구·검증기는
+  무변경 — `verify_fix._GRAMMAR_MODULES`가 이미 언어별 파서를 갖고 있어 V401은 해당 언어
+  문법으로 판정된다. 타겟 청크 코드펜스도 하드코딩 ```java에서 정규화 언어명으로 바뀌었다.
+  근거: `train/{javascript,go}/sft_training_set_20260904.jsonl`(1494/1252건) 전건 계약·청킹
+  통과, A100 qwen3.8-27b 스모크 각 1건 PASS. TypeScript/C/C++는 2026-09-15
+  평가 코퍼스 실행을 위해 동일 실행·검증 경로를 활성화했다. Python도 2026-09-16
+  동일 경로를 활성화했으며, 실제 모델을 통한 코퍼스 생성 검증은 별도로 필요하다.
 - **line-ending 보존 없음**: 프로덕션 `convert_to_line_ending` 미적용. 현 코퍼스
   0/343 CRLF — CRLF 소스 지원 시 추가 필요.
 - **contract-drift 자동 테스트 없음**: `contracts.py`는 손 미러. `agents.schema`
