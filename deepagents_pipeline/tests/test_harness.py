@@ -898,6 +898,20 @@ def test_mods_from_diff_roundtrips_compact_fixture_whitespace_shapes():
         assert _apply_wire_operations(original, modifications) == modified, name
 
 
+def test_pure_deletes_separated_by_blank_line_are_not_merged_into_blank_add():
+    original = ["a", "", "drop1", "", "drop2", "keep", "z"]
+    modified = ["a", "", "", "keep", "z"]
+
+    modifications, multi_site = mods_from_diff(original, modified)
+
+    assert modifications == [
+        {"type": "delete", "startLine": 3, "endLine": 3},
+        {"type": "delete", "startLine": 5, "endLine": 5},
+    ]
+    assert multi_site is True
+    assert _apply_wire_operations(original, modifications) == modified
+
+
 def test_unrepresentable_blank_diff_terminates_internal_without_verifier(monkeypatch):
     def verifier_must_not_run(*args, **kwargs):
         raise AssertionError("unrepresentable diff must not consume a verifier attempt")

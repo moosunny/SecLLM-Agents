@@ -560,12 +560,20 @@ def _convert_diff(
             )
         if regions and region[0] - regions[-1][1] < MERGE_GAP:
             previous = regions[-1]
-            regions[-1] = (
+            merged = (
                 previous[0],
                 max(previous[1], region[1]),
                 previous[2],
                 max(previous[3], region[3]),
             )
+            # 빈 줄만 사이에 둔 두 순수 삭제를 합치면 사이의 빈 줄이 병합 스팬의
+            # 수정본 조각이 되어 공백뿐인 add가 생긴다(2026-10-13 test_v2 row 253:
+            # 16·18행 삭제 → "16~18 삭제 + 빈 줄 add" → internal_error). 그런 병합은
+            # 하지 않고 hunk를 분리 출고한다.
+            if _blank_new_segment(mod, merged):
+                regions.append(region)
+            else:
+                regions[-1] = merged
         else:
             regions.append(region)
 
