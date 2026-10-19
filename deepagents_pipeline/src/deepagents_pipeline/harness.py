@@ -207,6 +207,49 @@ class SubmissionHolder:
             self.output_tokens += usage.get("output_tokens", 0)
 
 
+UNWRAPPED_ARGS_MARKER: Final = "harness_unwrapped_tool_args"
+
+
+def unwrap_tool_args(args: Any) -> dict[str, Any] | None:
+    """`{"arguments": "<JSON 객체 문자열>"}`로 한 겹 감싼 도구 인자를 풀어 돌려준다.
+
+    deepseek-v4-flash-0731은 OpenAI function 포맷을 그대로 흉내 내 인자를
+    `arguments` 키 하나에 JSON 문자열로 넣는 경우가 있다(2026-10-19 tscientific
+    1657건 중 193건, edit_code/submit_fix ValidationError 327회). 그 형태가 아니면
+    None — 정상 인자나 다른 형태의 오류는 건드리지 않는다.
+    """
+    if not isinstance(args, dict) or set(args) != {"arguments"}:
+        return None
+    inner = args["arguments"]
+    if isinstance(inner, str):
+        try:
+            inner = json.loads(inner)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(inner, dict) or not inner:
+        return None
+    return inner
+
+
+def _unwrap_response_tool_args(response: Any) -> None:
+    """모델 응답의 tool_calls 인자를 제자리에서 정규화하고 AIMessage에 표시한다.
+
+    여기서 고친 tool_calls가 상태 이력·다음 턴 컨텍스트·도구 입력이 되므로, SFT용
+    대화에도 감싼 형태가 남지 않는다(원본은 loop 기록의 raw_args에만 남는다).
+    """
+    for message in getattr(response, "result", None) or []:
+        if not isinstance(message, AIMessage):
+            continue
+        fixed: list[str] = []
+        for call in message.tool_calls:
+            inner = unwrap_tool_args(call.get("args"))
+            if inner is not None:
+                call["args"] = inner
+                fixed.append(str(call.get("id")))
+        if fixed:
+            message.additional_kwargs[UNWRAPPED_ARGS_MARKER] = fixed
+
+
 class HarnessControlMiddleware(AgentMiddleware):
     """도구 배제 + 구조적 종료 (2026-08-22: 리뷰 단계 제거, PASS 즉시 승격)."""
 
@@ -261,6 +304,7 @@ class HarnessControlMiddleware(AgentMiddleware):
         response = handler(
             request.override(tools=allowed, model_settings=model_settings)
         )
+        _unwrap_response_tool_args(response)
         if self.holder is not None:
             # 합성 종료 메시지는 handler를 거치지 않으므로 자동으로 집계에서 빠진다.
             self.holder.record_usage(response)

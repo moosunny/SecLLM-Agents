@@ -17,6 +17,8 @@ from typing import Any
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage
 
+from deepagents_pipeline.harness import unwrap_tool_args
+
 HEAD_CHARS = 120
 
 
@@ -106,16 +108,18 @@ class LoopTimelineCallback(BaseCallbackHandler):
                     continue
                 self._turn += 1
                 self.loop.append(_full_model_turn(self._turn, message))
-                calls = [
-                    {
-                        "tool": str(call.get("name", "")),
-                        "args_brief": _args_brief(
-                            str(call.get("name", "")),
-                            call.get("args", {}) if isinstance(call.get("args"), dict) else {},
-                        ),
-                    }
-                    for call in message.tool_calls
-                ]
+                calls = []
+                for call in message.tool_calls:
+                    args = _call_args(call)[0]
+                    calls.append(
+                        {
+                            "tool": str(call.get("name", "")),
+                            "args_brief": _args_brief(
+                                str(call.get("name", "")),
+                                args if isinstance(args, dict) else {},
+                            ),
+                        }
+                    )
                 self.events.append(
                     {
                         "ev": "model_turn",
@@ -171,6 +175,27 @@ class LoopTimelineCallback(BaseCallbackHandler):
         )
 
 
+def _call_args(call: Mapping[str, Any]) -> tuple[Any, bool]:
+    """(정규화된 args, 풀었는지). 이 콜백은 미들웨어 정규화보다 먼저 원본 메시지를 본다."""
+    args = call.get("args", {})
+    inner = unwrap_tool_args(args)
+    return (inner, True) if inner is not None else (args, False)
+
+
+def _full_tool_call(call: Mapping[str, Any]) -> dict[str, Any]:
+    args, unwrapped = _call_args(call)
+    out: dict[str, Any] = {
+        "id": call.get("id"),
+        "tool": str(call.get("name", "")),
+        "args": args,
+    }
+    if unwrapped:
+        # SFT 변환은 args(정규화본)를 쓴다; 모델 원본 출력은 raw_args로만 보존.
+        out["args_unwrapped"] = True
+        out["raw_args"] = call.get("args")
+    return out
+
+
 def _full_model_turn(turn: int, message: AIMessage) -> dict[str, Any]:
     extra = message.additional_kwargs or {}
     meta = message.response_metadata or {}
@@ -180,14 +205,7 @@ def _full_model_turn(turn: int, message: AIMessage) -> dict[str, Any]:
         "turn": turn,
         "text": message.text,
         "reasoning": extra.get("reasoning_content"),
-        "tool_calls": [
-            {
-                "id": call.get("id"),
-                "tool": str(call.get("name", "")),
-                "args": call.get("args", {}),
-            }
-            for call in message.tool_calls
-        ],
+        "tool_calls": [_full_tool_call(call) for call in message.tool_calls],
         "invalid_tool_calls": [
             {
                 "id": call.get("id"),

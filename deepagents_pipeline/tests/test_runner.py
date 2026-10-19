@@ -376,3 +376,39 @@ def test_loop_full_capture_records_prompt_turns_and_tool_results():
     assert list(row)[-2:] == ["timeline", "loop"]
     assert row["loop"][-1] == {"ev": "harness_end", "cause": "pass"}
     assert "loop" not in loop_output(record, callback.events)
+
+
+def test_loop_records_unwrapped_args_with_raw_original():
+    callback = LoopTimelineCallback()
+    inner = {"old_string": "int a = 1;", "new_string": "int a = 2;"}
+    wrapped = {"arguments": json.dumps(inner)}
+    message = AIMessage(
+        "",
+        tool_calls=[{"name": "edit_code", "args": wrapped, "id": "call-1", "type": "tool_call"}],
+    )
+
+    callback.on_llm_end(LLMResult(generations=[[ChatGeneration(message=message)]]))
+
+    call = callback.loop[-1]["tool_calls"][0]
+    assert call["args"] == inner
+    assert call["args_unwrapped"] is True
+    assert call["raw_args"] == wrapped
+    assert callback.events[-1]["tool_calls"][0]["args_brief"] == "old[0]='int a = 1;' (1L->1L)"
+
+
+def test_loop_canonical_args_have_no_unwrap_fields():
+    callback = LoopTimelineCallback()
+    message = AIMessage(
+        "",
+        tool_calls=[
+            {"name": "submit_fix", "args": {"desc": "x"}, "id": "call-1", "type": "tool_call"}
+        ],
+    )
+
+    callback.on_llm_end(LLMResult(generations=[[ChatGeneration(message=message)]]))
+
+    assert callback.loop[-1]["tool_calls"][0] == {
+        "id": "call-1",
+        "tool": "submit_fix",
+        "args": {"desc": "x"},
+    }

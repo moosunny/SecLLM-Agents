@@ -15,6 +15,7 @@ from deepagents_pipeline.harness import (
     MAX_MODEL_TURNS,
     MAX_NO_TOOL_NUDGES,
     SUPPORTED_LANGUAGES,
+    UNWRAPPED_ARGS_MARKER,
     HarnessControlMiddleware,
     SubmissionHolder,
     build_agent,
@@ -25,6 +26,7 @@ from deepagents_pipeline.harness import (
     render_target_chunks,
     run_fix,
     run_fix_with_trace,
+    unwrap_tool_args,
 )
 
 JAVA_LINES = (
@@ -1405,3 +1407,70 @@ def test_recursion_limit_allows_exactly_max_model_turns():
     dumped = outcome.response.model_dump(by_alias=True)
     assert dumped["errorNode"] == "fix_branch"
     assert dumped["errorType"] == "GraphRecursionError"
+
+
+# --- deepseek식 `{"arguments": "<JSON>"}` 감싼 도구 인자 정규화 (2026-10-20) ---
+
+
+def _wrapped(args: dict) -> dict:
+    return {"arguments": json.dumps(args, ensure_ascii=False)}
+
+
+def test_unwrap_tool_args_only_touches_single_arguments_wrapper():
+    inner = {"old_string": "a", "new_string": "b"}
+    assert unwrap_tool_args(_wrapped(inner)) == inner
+    assert unwrap_tool_args({"arguments": inner}) == inner
+    assert unwrap_tool_args(inner) is None
+    assert unwrap_tool_args({"arguments": "{not json"}) is None
+    assert unwrap_tool_args({"arguments": "[1, 2]"}) is None
+    assert unwrap_tool_args({"arguments": "{}"}) is None
+    assert unwrap_tool_args({"arguments": "{}", "desc": "x"}) is None
+
+
+def test_control_middleware_unwraps_wrapped_tool_args_in_place():
+    middleware = HarnessControlMiddleware(SubmissionHolder())
+    inner = {"old_string": GOOD_OLD, "new_string": GOOD_NEW}
+    message = AIMessage("", tool_calls=[_tc("edit_code", _wrapped(inner), "e1")])
+
+    output = middleware.wrap_model_call(
+        _StubRequest([_StubTool("edit_code")]), lambda _r: ModelResponse(result=[message])
+    )
+
+    call = output.result[0].tool_calls[0]
+    assert call["args"] == inner
+    assert output.result[0].additional_kwargs[UNWRAPPED_ARGS_MARKER] == ["e1"]
+
+
+def test_control_middleware_leaves_canonical_args_unmarked():
+    middleware = HarnessControlMiddleware(SubmissionHolder())
+    message = _edit_msg(1)
+
+    output = middleware.wrap_model_call(
+        _StubRequest([_StubTool("edit_code")]), lambda _r: ModelResponse(result=[message])
+    )
+
+    assert output.result[0].tool_calls[0]["args"] == {
+        "old_string": GOOD_OLD,
+        "new_string": GOOD_NEW,
+    }
+    assert UNWRAPPED_ARGS_MARKER not in output.result[0].additional_kwargs
+
+
+def test_wrapped_tool_args_pass_end_to_end_without_tool_error():
+    msgs = [
+        AIMessage(
+            "",
+            tool_calls=[
+                _tc("edit_code", _wrapped({"old_string": GOOD_OLD, "new_string": GOOD_NEW}), "e1")
+            ],
+        ),
+        AIMessage("", tool_calls=[_tc("submit_fix", _wrapped({"desc": KDESC}), "s1")]),
+    ]
+
+    outcome = run_fix_with_trace(_request(), _fake(msgs))
+
+    assert outcome.response.model_dump(by_alias=True)["isSuccess"] is True
+    assert outcome.terminal_cause == "pass"
+    assert outcome.model_turns == 2
+    assert outcome.edit_calls == 1
+    assert outcome.edit_errors == 0
