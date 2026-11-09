@@ -5,6 +5,8 @@ deepagents 기반 fix-suggestion 파이프라인의 실험 하네스 (완전형 
 프로젝트이며, 접점은 ① `repo_paths.py`의 verify_fix 경로 import ② eval 러너의
 격리 venv 인터프리터 기동뿐이다.
 
+외부 공유용 파이프라인 개요: [`docs/pipeline_overview.md`](docs/pipeline_overview.md)
+
 ## 실행
 
 ```bash
