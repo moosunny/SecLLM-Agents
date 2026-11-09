@@ -6,6 +6,8 @@
 - 샘플링 카브아웃: gpt-oss와 DeepSeek V4 Flash는 temperature/top_p만,
   claude 계열은 노브 전무
   (vLLM extra_body 전송 시 400 — 2026-07-29 스모크), 그 외 instruct_general 프리셋
+  AI Center 게이트웨이의 `aws-bedrock/*`(Claude·GPT 모두)도 노브 전무
+- LLM_REASONING_EFFORT 환경변수(low|medium|high…)가 있으면 `reasoning_effort`로 전송
 - API key: 요청 APIKEY > LITELLM_MASTER_KEY > "EMPTY"
 """
 
@@ -51,6 +53,9 @@ DEEPSEEK_V4_FLASH_0731_MODEL_MARKER: Final = "deepseek-v4-flash-0731"
 DEEPSEEK_V4_FLASH_0731_TEMPERATURE: Final = 1.0
 DEEPSEEK_V4_FLASH_0731_TOP_P: Final = 0.95
 CLAUDE_MODEL_MARKER: Final = "claude"
+# AI Center Bedrock 게이트웨이는 모델을 `aws-bedrock/sonnet-5`, `aws-bedrock/gpt-5-6-sol`처럼
+# 노출하고, 둘 다 temperature를 보내면 400이다 (2026-10-27 확인).
+BEDROCK_MODEL_PREFIX: Final = "aws-bedrock/"
 
 # qwen3.5 계열 권장 샘플링 (2026-08-20 사용자 지정) — lora 파생 모델명도 포함된다
 QWEN35_MODEL_MARKER: Final = "qwen3.5"
@@ -101,7 +106,7 @@ def resolve_sampling(model: str) -> tuple[float | None, dict[str, object]]:
         return DEEPSEEK_V4_FLASH_0731_TEMPERATURE, {
             "top_p": DEEPSEEK_V4_FLASH_0731_TOP_P,
         }
-    if CLAUDE_MODEL_MARKER in lowered:
+    if CLAUDE_MODEL_MARKER in lowered or lowered.startswith(BEDROCK_MODEL_PREFIX):
         return None, {}
     if QWEN35_MODEL_MARKER in lowered:
         return QWEN35_TEMPERATURE, dict(QWEN35_EXTRA_BODY)
@@ -145,6 +150,7 @@ def create_chat_model(
             extra_body=extra_body,
             max_completion_tokens=FIX_MAX_TOKENS,
             timeout=FIX_SRC_CODE_TIMEOUT,
+            reasoning_effort=os.getenv("LLM_REASONING_EFFORT") or None,
         )
     except Exception as exc:
         # serviceHost/servicePort가 조합 불가한 URL이면 httpx가 생성 시점에 던진다.

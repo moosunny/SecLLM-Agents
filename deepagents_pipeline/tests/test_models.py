@@ -107,3 +107,15 @@ def test_model_override():
     model = create_chat_model(_request(), model_override="claude-haiku-4-5-20251001")
     assert model.model_name == "claude-haiku-4-5-20251001"
     assert model.temperature is None
+
+
+def test_bedrock_no_sampling_knobs():
+    for name in ("aws-bedrock/sonnet-5", "aws-bedrock/fable-5-1", "aws-bedrock/gpt-5-6-sol"):
+        assert resolve_sampling(name) == (None, {})
+
+
+def test_reasoning_effort_from_env(monkeypatch):
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "medium")
+    assert create_chat_model(_request(model="aws-bedrock/sonnet-5")).reasoning_effort == "medium"
+    monkeypatch.delenv("LLM_REASONING_EFFORT")
+    assert create_chat_model(_request(model="aws-bedrock/sonnet-5")).reasoning_effort is None
